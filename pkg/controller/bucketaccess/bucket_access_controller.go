@@ -98,9 +98,35 @@ func (bal *bucketAccessListener) Add(ctx context.Context, obj *v1alpha1.BucketAc
 		return nil
 	}
 
+	bucketInstanceName := obj.Spec.BucketInstanceName
+	bucket, err := bal.bucketAccessClient.ObjectstorageV1alpha1().Buckets().Get(ctx, bucketInstanceName, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("unable to get bucket instance %s: %+v", bucketInstanceName, err)
+	}
+
 	req := osspec.ProvisionerGrantBucketAccessRequest{
-		BucketName: obj.Spec.BucketInstanceName,
-		Principal:  obj.Spec.Principal,
+		Principal:     obj.Spec.Principal,
+		AccessPolicy:  obj.Spec.PolicyActionsConfigMapData,
+		BucketContext: map[string]string{},
+	}
+
+	switch bucket.Spec.Protocol.Name {
+	case v1alpha1.ProtocolNameS3:
+		req.BucketName = bucket.Spec.Protocol.S3.BucketName
+		req.Region = bucket.Spec.Protocol.S3.Region
+		req.BucketContext["Version"] = bucket.Spec.Protocol.S3.Version
+		req.BucketContext["SignatureVersion"] = string(bucket.Spec.Protocol.S3.SignatureVersion)
+		req.BucketContext["Endpoint"] = bucket.Spec.Protocol.S3.Endpoint
+	case v1alpha1.ProtocolNameAzure:
+		req.BucketName = bucket.Spec.Protocol.AzureBlob.ContainerName
+		req.BucketContext["StorageAccount"] = bucket.Spec.Protocol.AzureBlob.StorageAccount
+	case v1alpha1.ProtocolNameGCS:
+		req.BucketName = bucket.Spec.Protocol.GCS.BucketName
+		req.BucketContext["ServiceAccount"] = bucket.Spec.Protocol.GCS.ServiceAccount
+		req.BucketContext["PrivateKeyName"] = bucket.Spec.Protocol.GCS.PrivateKeyName
+		req.BucketContext["ProjectID"] = bucket.Spec.Protocol.GCS.ProjectID
+	default:
+		return fmt.Errorf("unknown protocol: %s", bucket.Spec.Protocol.Name)
 	}
 
 	// TODO set grpc timeout
@@ -111,7 +137,8 @@ func (bal *bucketAccessListener) Add(ctx context.Context, obj *v1alpha1.BucketAc
 	}
 	klog.V(1).Infof("provisioner returned grant bucket access response %v", rsp)
 
-	// update bucket access status to success
+	// update bucket access status to granted
+	obj.Status.Message = "Permissions Granted"
 	obj.Status.AccessGranted = true
 	_, err = bal.bucketAccessClient.ObjectstorageV1alpha1().BucketAccesses().UpdateStatus(ctx, obj, metav1.UpdateOptions{})
 	return nil
@@ -132,9 +159,34 @@ func (bal *bucketAccessListener) Delete(ctx context.Context, obj *v1alpha1.Bucke
 		return nil
 	}
 
+	bucketInstanceName := obj.Spec.BucketInstanceName
+	bucket, err := bal.bucketAccessClient.ObjectstorageV1alpha1().Buckets().Get(ctx, bucketInstanceName, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("unable to get bucket instance %s: %+v", bucketInstanceName, err)
+	}
+
 	req := osspec.ProvisionerRevokeBucketAccessRequest{
-		BucketName: obj.Spec.BucketInstanceName,
-		Principal:  obj.Spec.Principal,
+		Principal:     obj.Spec.Principal,
+		BucketContext: map[string]string{},
+	}
+
+	switch bucket.Spec.Protocol.Name {
+	case v1alpha1.ProtocolNameS3:
+		req.BucketName = bucket.Spec.Protocol.S3.BucketName
+		req.Region = bucket.Spec.Protocol.S3.Region
+		req.BucketContext["Version"] = bucket.Spec.Protocol.S3.Version
+		req.BucketContext["SignatureVersion"] = string(bucket.Spec.Protocol.S3.SignatureVersion)
+		req.BucketContext["Endpoint"] = bucket.Spec.Protocol.S3.Endpoint
+	case v1alpha1.ProtocolNameAzure:
+		req.BucketName = bucket.Spec.Protocol.AzureBlob.ContainerName
+		req.BucketContext["StorageAccount"] = bucket.Spec.Protocol.AzureBlob.StorageAccount
+	case v1alpha1.ProtocolNameGCS:
+		req.BucketName = bucket.Spec.Protocol.GCS.BucketName
+		req.BucketContext["ServiceAccount"] = bucket.Spec.Protocol.GCS.ServiceAccount
+		req.BucketContext["PrivateKeyName"] = bucket.Spec.Protocol.GCS.PrivateKeyName
+		req.BucketContext["ProjectID"] = bucket.Spec.Protocol.GCS.ProjectID
+	default:
+		return fmt.Errorf("unknown protocol: %s", bucket.Spec.Protocol.Name)
 	}
 
 	// TODO set grpc timeout
@@ -145,5 +197,9 @@ func (bal *bucketAccessListener) Delete(ctx context.Context, obj *v1alpha1.Bucke
 	}
 	klog.V(1).Infof("provisioner returned revoke bucket access response %v", rsp)
 
+	// update bucket access status to revoked
+	obj.Status.Message = "Permissions Revoked"
+	obj.Status.AccessGranted = false
+	_, err = bal.bucketAccessClient.ObjectstorageV1alpha1().BucketAccesses().UpdateStatus(ctx, obj, metav1.UpdateOptions{})
 	return nil
 }
