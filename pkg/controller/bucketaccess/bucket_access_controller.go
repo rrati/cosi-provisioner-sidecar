@@ -26,6 +26,7 @@ import (
 	utilversion "k8s.io/apimachinery/pkg/util/version"
 
 	kubeclientset "k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/util/retry"
 	"k8s.io/client-go/util/workqueue"
 
 	"github.com/container-object-storage-interface/api/apis/objectstorage.k8s.io/v1alpha1"
@@ -138,10 +139,7 @@ func (bal *bucketAccessListener) Add(ctx context.Context, obj *v1alpha1.BucketAc
 	klog.V(1).Infof("provisioner returned grant bucket access response %v", rsp)
 
 	// update bucket access status to granted
-	obj.Status.Message = "Permissions Granted"
-	obj.Status.AccessGranted = true
-	_, err = bal.bucketAccessClient.ObjectstorageV1alpha1().BucketAccesses().UpdateStatus(ctx, obj, metav1.UpdateOptions{})
-	return nil
+	return bal.updateStatus(ctx, obj.Name, "Permissions Granted", true)
 }
 
 // Update does nothing
@@ -198,8 +196,19 @@ func (bal *bucketAccessListener) Delete(ctx context.Context, obj *v1alpha1.Bucke
 	klog.V(1).Infof("provisioner returned revoke bucket access response %v", rsp)
 
 	// update bucket access status to revoked
-	obj.Status.Message = "Permissions Revoked"
-	obj.Status.AccessGranted = false
-	_, err = bal.bucketAccessClient.ObjectstorageV1alpha1().BucketAccesses().UpdateStatus(ctx, obj, metav1.UpdateOptions{})
-	return nil
+	return bal.updateStatus(ctx, obj.Name, "Permissions Revoked", false)
+}
+
+func (bal *bucketAccessListener) updateStatus(ctx context.Context, name, msg string, state bool) error {
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		bucketAccess, err := bal.bucketAccessClient.ObjectstorageV1alpha1().BucketAccesses().Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		bucketAccess.Status.Message = msg
+		bucketAccess.Status.AccessGranted = state
+		_, err = bal.bucketAccessClient.ObjectstorageV1alpha1().BucketAccesses().UpdateStatus(ctx, bucketAccess, metav1.UpdateOptions{})
+		return err
+	})
+	return err
 }

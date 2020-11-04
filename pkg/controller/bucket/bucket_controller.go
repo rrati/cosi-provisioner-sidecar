@@ -26,6 +26,7 @@ import (
 	utilversion "k8s.io/apimachinery/pkg/util/version"
 
 	kubeclientset "k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/util/retry"
 	"k8s.io/client-go/util/workqueue"
 
 	"github.com/container-object-storage-interface/api/apis/objectstorage.k8s.io/v1alpha1"
@@ -138,10 +139,7 @@ func (bl *bucketListener) Add(ctx context.Context, obj *v1alpha1.Bucket) error {
 	// TODO update the bucket name and endpoint in the protocol spec
 
 	// update bucket availability to true
-	obj.Status.Message = "Bucket provisioned"
-	obj.Status.BucketAvailable = true
-	_, err = bl.bucketClient.ObjectstorageV1alpha1().Buckets().UpdateStatus(ctx, obj, metav1.UpdateOptions{})
-	return err
+	return bl.updateStatus(ctx, obj.Name, "Bucket Provisioned", true)
 }
 
 // Update does nothing
@@ -194,9 +192,19 @@ func (bl *bucketListener) Delete(ctx context.Context, obj *v1alpha1.Bucket) erro
 	klog.V(1).Infof("provisioner returned delete bucket response %v", rsp)
 
 	// update bucket availability to false
-	obj.Status.Message = "Bucket Deleted"
-	obj.Status.BucketAvailable = false
-	_, err = bl.bucketClient.ObjectstorageV1alpha1().Buckets().UpdateStatus(ctx, obj, metav1.UpdateOptions{})
+	return bl.updateStatus(ctx, obj.Name, "Bucket Deleted", false)
+}
 
-	return nil
+func (bl *bucketListener) updateStatus(ctx context.Context, name, msg string, state bool) error {
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		bucket, err := bl.bucketClient.ObjectstorageV1alpha1().Buckets().Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		bucket.Status.Message = msg
+		bucket.Status.BucketAvailable = state
+		_, err = bl.bucketClient.ObjectstorageV1alpha1().Buckets().UpdateStatus(ctx, bucket, metav1.UpdateOptions{})
+		return err
+	})
+	return err
 }
