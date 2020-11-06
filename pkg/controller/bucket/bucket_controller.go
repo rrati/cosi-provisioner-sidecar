@@ -108,9 +108,14 @@ func (bl *bucketListener) Add(ctx context.Context, obj *v1alpha1.Bucket) error {
 		req.BucketContext["BucketPrefix"] = obj.Spec.Parameters["BucketPrefix"]
 	}
 
-	anonAccessMode := obj.Spec.Parameters["AnonymousAccessMode"]
-	if len(anonAccessMode) > 0 {
-		req.AnonymousBucketAccessMode = osspec.ProvisionerCreateBucketRequest_AnonymousBucketAccessMode(osspec.ProvisionerCreateBucketRequest_AnonymousBucketAccessMode_value[anonAccessMode])
+	if obj.Spec.AnonymousAccessMode.Private {
+		req.AnonymousBucketAccessMode = osspec.ProvisionerCreateBucketRequest_BUCKET_PRIVATE
+	} else if obj.Spec.AnonymousAccessMode.PublicReadOnly {
+		req.AnonymousBucketAccessMode = osspec.ProvisionerCreateBucketRequest_BUCKET_READ_ONLY
+	} else if obj.Spec.AnonymousAccessMode.PublicReadWrite {
+		req.AnonymousBucketAccessMode = osspec.ProvisionerCreateBucketRequest_BUCKET_WRITE_ONLY
+	} else if obj.Spec.AnonymousAccessMode.PublicWriteOnly {
+		req.AnonymousBucketAccessMode = osspec.ProvisionerCreateBucketRequest_BUCKET_READ_WRITE
 	}
 
 	switch obj.Spec.Protocol.Name {
