@@ -539,6 +539,9 @@ func TestDelete(t *testing.T) {
 				Principal:          principal,
 				ServiceAccount:     tc.serviceAccount,
 			},
+			Status: v1alpha1.BucketAccessStatus{
+				AccessGranted: true,
+			},
 		}
 		secretName := generateSecretName(ba.UID)
 		secret := v1.Secret{
@@ -565,8 +568,10 @@ func TestDelete(t *testing.T) {
 		if err != nil {
 			t.Errorf("delete returned: %+v", err)
 		}
-		if ba.Status.AccessGranted != false {
-			t.Errorf("expected %t, got %t", true, ba.Status.AccessGranted)
+
+		updatedBA, _ := client.ObjectstorageV1alpha1().BucketAccesses().Get(ctx, ba.Name, metav1.GetOptions{})
+		if updatedBA.Status.AccessGranted != false {
+			t.Errorf("expected %t, got %t", false, ba.Status.AccessGranted)
 		}
 
 		_, err = kubeClient.CoreV1().Secrets("objectstorage-system").Get(ctx, secretName, metav1.GetOptions{})
